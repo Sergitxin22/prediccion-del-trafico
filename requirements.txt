@@ -1,9 +1,11 @@
+flax==0.10.7
 jax==0.6.2
 jax-cuda12-pjrt==0.6.2
 jax-cuda12-plugin==0.6.2
 jaxlib==0.6.2
 joblib==1.5.3
 jraph==0.0.6.dev0
+matplotlib==3.10.7
 ml_dtypes==0.5.4
 numpy==2.2.6
 nvidia-cublas-cu12==12.9.2.10
@@ -20,12 +22,14 @@ nvidia-nccl-cu12==2.30.7
 nvidia-nvjitlink-cu12==12.9.86
 nvidia-nvshmem-cu12==3.7.2
 opt_einsum==3.4.0
+optax==0.2.8
 pandas==2.3.3
 python-dateutil==2.9.0.post0
 pytz==2026.2
 scikit-learn==1.7.2
 scipy==1.15.3
 six==1.17.0
+tensorboardX==2.6.4
 threadpoolctl==3.6.0
 tqdm==4.68.3
 tzdata==2026.2
