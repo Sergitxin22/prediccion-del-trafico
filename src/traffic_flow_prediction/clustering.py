@@ -20,7 +20,7 @@ def generate_base(sensors: pd.DataFrame) -> pd.DataFrame:
 def generate_behaviour(traffic: pd.DataFrame, n_clusters:  int) -> pd.DataFrame:
     df = (
         traffic
-        .groupby(["id", "daytype_TF"])["congestion"]
+        .groupby(["id", "daytype_TF"], observed=True)["congestion"]
         .mean()
         .reset_index()
         .pivot(index="id", columns="daytype_TF", values="congestion")

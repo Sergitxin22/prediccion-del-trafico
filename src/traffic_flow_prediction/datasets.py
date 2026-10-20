@@ -1,5 +1,7 @@
 from collections.abc import Iterator
+from pathlib import Path
 
+import numpy as np
 import jax
 import jax.numpy as jnp
 import jax.random as jrand
@@ -42,8 +44,6 @@ class DataLoader:
 
 
 def to_edges(df_edges: pd.DataFrame) -> tuple[jax.Array, jax.Array, jax.Array]:
-    if df_edges.empty:
-        raise ValueError("df_edges")
     m = len(df_edges)
     if "weight" in df_edges.columns:
         edges = jnp.asarray(df_edges["weight"].values, dtype=jnp.float32)[:, jnp.newaxis]
@@ -81,3 +81,82 @@ def split_time(
         x[n_train           : n_train + n_valid], y[n_train           : n_train + n_valid],
         x[n_train + n_valid :                  ], y[n_train + n_valid :                  ],
     )
+
+
+def prepare_series(matrix, *, window, horizon, train_end, valid_end, max_fill_steps=4):
+    if min(window, horizon) < 1 or max_fill_steps < 0:
+        raise ValueError("Invalid window, horizon or fill limit.")
+    if not window+horizon <= train_end < valid_end < len(matrix):
+        raise ValueError("Not enough data for chronological train, validation and test splits.")
+    if min(valid_end-train_end, len(matrix)-valid_end) < horizon:
+        raise ValueError("The forecast horizon does not fit inside each split.")
+    if not matrix.index.is_unique or not matrix.index.is_monotonic_increasing:
+        raise ValueError("Timestamps must be unique and increasing.")
+    matrix = matrix.replace([np.inf, -np.inf], np.nan)
+    if not matrix.iloc[:train_end].notna().any().all():
+        raise ValueError("Every node must have observed training data.")
+    observed = matrix.notna().to_numpy()
+    inputs = matrix.ffill(limit=max_fill_steps) if max_fill_steps else matrix
+    data = {
+        "values": inputs.fillna(0.).to_numpy(dtype=np.float32),
+        "observed": observed,
+        "times": matrix.index.to_numpy(dtype="datetime64[ns]"),
+        "node_labels": matrix.columns.to_numpy(dtype=np.int64),
+        "window": np.array(window), "horizon": np.array(horizon),
+        "train_starts": np.arange(window, train_end-horizon+1, dtype=np.int32),
+        "valid_starts": np.arange(train_end, valid_end-horizon+1, dtype=np.int32),
+        "test_starts": np.arange(valid_end, len(matrix)-horizon+1, dtype=np.int32),
+    }
+    for split in ("train", "valid", "test"):
+        starts = data[f"{split}_starts"]
+        keep = observed[starts[:, None]+np.arange(horizon)].any(axis=(1, 2))
+        data[f"{split}_starts"] = starts[keep]
+        if not keep.any():
+            raise ValueError(f"No observed targets in {split}.")
+    return data
+
+
+class WindowDataLoader:
+    def __init__(self, data, split, batch_size, *, shuffle=False, seed=42):
+        if batch_size < 1:
+            raise ValueError("Batch size must be positive.")
+        if shuffle and split != "train":
+            raise ValueError("Validation and test must remain chronological.")
+        self.data = data
+        self.starts = data[f"{split}_starts"]
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.rng = np.random.default_rng(seed)
+
+    def __len__(self):
+        return (len(self.starts)+self.batch_size-1)//self.batch_size
+
+    def __iter__(self):
+        starts = self.rng.permutation(self.starts) if self.shuffle else self.starts
+        window, horizon = int(self.data["window"]), int(self.data["horizon"])
+        for offset in range(0, len(starts), self.batch_size):
+            current = starts[offset:offset+self.batch_size]
+            past = current[:, None]+np.arange(-window, 0)
+            future = current[:, None]+np.arange(horizon)
+            yield (self.data["values"][past, :, None], self.data["values"][future, :, None],
+                   self.data["observed"][future, :, None], current)
+
+
+def save_checkpoint(path: Path, model):
+    entries, _ = jax.tree_util.tree_flatten_with_path(nnx.state(model, nnx.Param))
+    arrays = {f"param_{i}": np.asarray(value) for i, (_, value) in enumerate(entries)}
+    arrays["parameter_paths"] = np.asarray([jax.tree_util.keystr(key) for key, _ in entries])
+    with path.open("xb") as file:
+        np.savez(file, **arrays)
+
+
+def load_checkpoint(path: Path, model):
+    entries, structure = jax.tree_util.tree_flatten_with_path(nnx.state(model, nnx.Param))
+    with np.load(path, allow_pickle=False) as saved:
+        paths = [jax.tree_util.keystr(key) for key, _ in entries]
+        if saved["parameter_paths"].tolist() != paths:
+            raise ValueError("Checkpoint architecture does not match this model.")
+        leaves = [saved[f"param_{i}"] for i in range(len(entries))]
+        if any(array.shape != value.shape for array, (_, value) in zip(leaves, entries)):
+            raise ValueError("Checkpoint dimensions do not match this model.")
+    nnx.update(model, jax.tree_util.tree_unflatten(structure, [jnp.asarray(x) for x in leaves]))

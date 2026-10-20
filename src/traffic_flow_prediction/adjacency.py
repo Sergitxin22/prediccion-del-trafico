@@ -23,39 +23,37 @@ def reindex_cluster_time_matrix(c_t_matrix: pd.DataFrame) -> tuple[pd.DataFrame,
 def generate_correlation(
     c_t_matrix: pd.DataFrame,
     k:          int,
+    *,
+    negative_policy: str = "error",
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[int]]:
-    matrix = c_t_matrix.copy()
-    
-    std_per_cluster = matrix.std()
-    constant_clusters = std_per_cluster[std_per_cluster == 0].index.tolist()
-    matrix = matrix.drop(columns=constant_clusters)
-    
+    if k < 1 or negative_policy not in ("error", "zero"):
+        raise ValueError("k must be positive and negative_policy must be error or zero.")
+    matrix = c_t_matrix.replace([np.inf, -np.inf], np.nan)
+    matrix = matrix.loc[:, matrix.nunique(dropna=True) > 1]
+    if matrix.empty:
+        raise ValueError("No nonconstant training nodes for correlation.")
     matrix_gnn, _, nodes_idx = reindex_cluster_time_matrix(matrix)
-    corr_matrix = c_t_matrix.corr(method="pearson").fillna(0.0)
-    corr_values = corr_matrix.values
-    cluster_labels = corr_matrix.columns.tolist()
-    
+    corr_values = matrix_gnn.corr(method="pearson", min_periods=2).to_numpy()
+    np.fill_diagonal(corr_values, np.nan)
     edges = []
-    n = corr_values.shape[0]
-    if n == 1:
-        edges.append((0, 0, 1.0))
-    else:
-        k_eff = min(k, n - 1)
-        for i in range(n):
-            queue = corr_values[i].copy()
-            queue[i] = -np.inf
-            top_idx = np.argsort(queue)[-k_eff:]
-            top_idx = top_idx[np.argsort(queue[top_idx])[::-1]]
-            source_cluster = cluster_labels[i]
-            for j in top_idx:
-                target_cluster = cluster_labels[j]
-                weight = float(max(corr_values[i, j], 0.0))
-                edges.append((source_cluster, target_cluster, weight))
-    df_edges = pd.DataFrame(edges, columns=["source", "target", "weight"])
+    for i in range(len(nodes_idx)):
+        candidates = np.flatnonzero(np.isfinite(corr_values[i]))
+        if len(nodes_idx) > 1 and not len(candidates):
+            raise ValueError(f"No valid training correlations for node {nodes_idx[i]}.")
+        top_idx = candidates[np.argsort(-corr_values[i, candidates], kind="stable")[:k]]
+        for j in top_idx:
+            correlation = float(corr_values[i, j])
+            if correlation < 0 and negative_policy == "error":
+                raise ValueError("Negative top-k correlations require an explicit policy; use negative_policy='zero' to preserve the original zero-clipping behavior.")
+            weight = max(correlation, 0.) if negative_policy == "zero" else correlation
+            edges.append((i, int(j), weight, correlation))
+    df_edges = pd.DataFrame(edges, columns=["source", "target", "weight", "raw_correlation"])
     return matrix_gnn, df_edges, nodes_idx
 
 
 def knn_from_centroids(centroids: pd.DataFrame, k: int) -> pd.DataFrame:
+    if k < 1:
+        raise ValueError("k must be positive.")
     centroids = centroids.sort_values("cluster").reset_index(drop=True).copy()
     coords = centroids[["utm_x", "utm_y"]]
     n = len(coords)
@@ -72,12 +70,13 @@ def knn_from_centroids(centroids: pd.DataFrame, k: int) -> pd.DataFrame:
     edges = []
     for i in range(n):
         source = int(centroids.loc[i, "cluster"])
-        for dist, j in zip(distances[i, 1:], indices[i, 1:]):
+        neighbors = [(dist, j) for dist, j in zip(distances[i], indices[i]) if j != i][:k_eff]
+        for dist, j in neighbors:
             target = int(centroids.loc[j, "cluster"])
             edges.append((source, target, float(dist)))
     
     df_edges = pd.DataFrame(edges, columns=["source", "target", "distance"])
-    sigma = df_edges["distance"].replace(0, np.nan).mean()
+    sigma = df_edges["distance"].mean()
     if not np.isfinite(sigma) or sigma <= 0:
         sigma = 1.0
     df_edges["weight"] = np.exp(-df_edges["distance"] / sigma)
