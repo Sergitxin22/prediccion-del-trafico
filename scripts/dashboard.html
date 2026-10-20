@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Comparación interactiva de los modelos de predicción de congestión del PFM por sensor y agrupación.">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  <script src="/assets/dashboard.js" defer></script>
+  <title>Comparador de modelos | Predicción vial</title>
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <div class="masthead-top">
+        <div class="brand"><span class="brand-symbol" aria-hidden="true">TF</span><span>Predicción vial <small>PFM · análisis de modelos</small></span></div>
+        <span class="period-tag" id="period-tag">Resultados históricos</span>
+      </div>
+      <div class="intro">
+        <p class="eyebrow">EXPLORA LOS RESULTADOS</p>
+        <h1>4.320 configuraciones.<br><span>Una misma medida.</span></h1>
+        <p>Explora curvas por sensor, dos rankings verificables y comparaciones entre grafos sin perder de vista la referencia más sencilla.</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel controls" aria-labelledby="controls-heading">
+        <div class="section-top"><div><p class="section-kicker">01 / CONFIGURACIÓN</p><h2 id="controls-heading">Elige qué comparar</h2></div><span class="mini-note">Solo datos de prueba · sin reentrenar</span></div>
+        <div class="control-grid">
+          <label class="control"><span>Agrupación de nodos</span><select id="group" disabled><option>Cargando...</option></select></label>
+          <label class="control"><span>Conexiones del grafo</span><select id="graph" disabled><option>Cargando...</option></select></label>
+          <label class="control"><span>Horizonte</span><select id="horizon" disabled><option value="1">+15 min</option></select></label>
+          <label class="control"><span>Periodo de prueba</span><select id="time-range"><option value="all">Todo el periodo</option><option value="48h">Últimas 48 horas</option><option value="24h">Últimas 24 horas</option></select></label>
+          <label class="control"><span>Buscar sensor por ID o nombre</span><input id="sensor-filter" type="search" placeholder="Ej. 3937 o Serrano" autocomplete="off" disabled></label>
+          <label class="control"><span>Sensor</span><select id="sensor" disabled><option>Cargando...</option></select></label>
+        </div>
+        <p id="selection-note" class="selection-note" role="status" aria-live="polite">Cargando resultados...</p>
+      </section>
+
+      <nav class="view-tabs" role="tablist" aria-label="Vistas del análisis">
+        <button type="button" role="tab" data-view="curves" aria-selected="true" aria-controls="curve-view">Por sensor</button>
+        <button type="button" role="tab" data-view="rankings" aria-selected="false" aria-controls="rankings-view">Rankings</button>
+        <button type="button" role="tab" data-view="comparison" aria-selected="false" aria-controls="comparison-view">Comparar modelos</button>
+      </nav>
+      <div id="curve-view" role="tabpanel">
+      <section id="config-picker" class="panel config-picker" hidden aria-labelledby="config-heading">
+        <div class="section-top"><div><p class="section-kicker">MODELOS EN LA GRÁFICA</p><h2 id="config-heading">Elige hasta cuatro configuraciones</h2></div><span id="chosen-count" class="mini-note">0 / 4</span></div>
+        <p id="chosen-models" class="description">Elige configuraciones en los rankings; las curvas precalculadas aparecerán aquí.</p>
+      </section>
+      <section class="facts" aria-label="Datos de esta comparación">
+        <div class="fact"><span class="fact-label">Sensor elegido</span><strong id="fact-sensor">—</strong><span id="fact-sensor-detail">Selecciona un sensor</span></div>
+        <div class="fact"><span class="fact-label">Señal representada</span><strong id="fact-node">—</strong><span id="fact-node-detail">Índice de congestión del PFM</span></div>
+        <div class="fact"><span class="fact-label">Predicción</span><strong id="fact-horizon">—</strong><span id="fact-horizon-detail">Después del último dato disponible</span></div>
+        <div class="fact"><span class="fact-label">Medidas evaluables</span><strong id="fact-observed">—</strong><span id="fact-observed-detail">No contamos los objetivos ausentes</span></div>
+      </section>
+
+      <section class="panel chart-panel" aria-labelledby="chart-heading">
+        <div class="section-top chart-title"><div><p class="section-kicker">02 / SEÑALES EN EL TIEMPO</p><h2 id="chart-heading">Predicciones frente a realidad</h2><p id="chart-subtitle" class="description">Las configuraciones elegidas comparten las mismas fechas y medidas observadas.</p></div>
+          <div class="actions"><button id="download-png" class="action-button" type="button" disabled>Descargar PNG</button><button id="download-csv" class="action-button" type="button" disabled>Descargar CSV</button></div>
+        </div>
+        <div class="chart-box">
+          <canvas id="chart" role="img" aria-label="Evolución del índice de congestión observado, las predicciones de los modelos y la persistencia" aria-describedby="chart-caption">Tu navegador no puede mostrar este gráfico.</canvas>
+          <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+        </div>
+        <div id="legend" class="legend" role="group" aria-label="Mostrar u ocultar curvas"></div>
+        <p id="chart-caption" class="chart-caption">Negro: valor observado. Colores: modelos. Gris discontinuo: repetir el último valor. Haz clic en una serie para ocultarla; pasa el cursor por la gráfica para ver los valores.</p>
+      </section>
+
+      <section class="panel metrics-panel" aria-labelledby="metrics-heading">
+        <div class="section-top"><div><p class="section-kicker">03 / ERRORES DEL SENSOR</p><h2 id="metrics-heading">¿Cuál se acercó más?</h2></div><span id="leader-tag" class="leader-tag">—</span></div>
+        <p class="description">MSE penaliza especialmente los errores grandes. MAE mide la distancia absoluta media. <strong>Cuanto menores, mejor.</strong> Son errores del índice, no porcentajes de acierto.</p>
+        <div class="table-wrap"><table><thead><tr><th scope="col">Modelo o referencia</th><th scope="col">MSE <span>↓</span></th><th scope="col">MAE <span>↓</span></th><th scope="col">Respecto a repetir</th></tr></thead><tbody id="scores"><tr><td colspan="4">Esperando selección...</td></tr></tbody></table></div>
+        <p id="metric-note" class="metric-note">Los errores se calcularán solo sobre las fechas mostradas con una medición real del nodo seleccionado. La mejor época de cada modelo se eligió por validación global, no por estos resultados de prueba.</p>
+      </section>
+      </div>
+
+      <section id="rankings-view" role="tabpanel" class="panel" hidden aria-labelledby="rankings-heading">
+        <div class="section-top"><div><p class="section-kicker">CONFIGURACIONES / EVALUACIÓN</p><h2 id="rankings-heading">Dos formas de ordenar los modelos</h2></div><div class="actions"><span id="ranking-progress" class="mini-note">Consultando resultados...</span><button id="show-chart" class="action-button" type="button">Ver selección en gráfico</button></div></div>
+        <p class="description">Cada ranking compara configuraciones dentro de la misma agrupación. Validación sirvió para elegir modelos; el orden en prueba es descriptivo y no demuestra generalización.</p>
+        <div class="ranking-filters">
+          <label class="control"><span>Conjunto</span><select id="ranking-phase"><option value="test">Prueba (descriptivo)</option><option value="validation">Validación (selección)</option></select></label>
+          <label class="control"><span>Arquitectura</span><select id="filter-architecture"><option value="">Ambas</option><option value="pfm">PFM</option><option value="upstream_bidirectional">GitHub bidireccional</option></select></label>
+          <label class="control"><span>Modelo</span><select id="filter-model"><option value="">Todos</option><option value="gcn_lstm">GCN-LSTM</option><option value="gcn_gru">GCN-GRU</option><option value="gat_lstm">GAT-LSTM</option><option value="gat_gru">GAT-GRU</option></select></label>
+          <label class="control"><span>α temporal</span><select id="filter-alpha"><option value="">Todos</option><option>0</option><option>0.2</option><option>0.4</option><option>0.6</option><option>0.8</option><option>1</option></select></label>
+          <label class="control"><span>Capas</span><select id="filter-layers"><option value="">Todas</option><option>1</option><option>2</option><option>3</option></select></label>
+          <label class="control"><span>Dimensión</span><select id="filter-hidden"><option value="">Todas</option><option>32</option><option>64</option><option>128</option></select></label>
+        </div>
+        <p id="ranking-note" class="metric-note">MSE penaliza más los errores grandes; MAE representa el error absoluto medio. Cuanto menores, mejor.</p>
+        <div class="ranking-pair">
+          <div><h3>01 / Menor MSE</h3><div class="table-wrap"><table><thead><tr><th>Puesto</th><th>Configuración</th><th>MSE ↓</th><th>MAE ↓</th><th>Gráfica</th></tr></thead><tbody id="ranking-mse"></tbody></table></div></div>
+          <div><h3>02 / Menor MAE</h3><div class="table-wrap"><table><thead><tr><th>Puesto</th><th>Configuración</th><th>MSE ↓</th><th>MAE ↓</th><th>Gráfica</th></tr></thead><tbody id="ranking-mae"></tbody></table></div></div>
+        </div>
+        <div class="ranking-pager"><button id="ranking-prev" class="action-button" type="button">Anterior</button><span id="ranking-page">1 / 1</span><button id="ranking-next" class="action-button" type="button">Siguiente</button></div>
+      </section>
+
+      <section id="comparison-view" role="tabpanel" class="panel" hidden aria-labelledby="comparison-heading">
+        <div class="section-top"><div><p class="section-kicker">MSE RELATIVO / PRUEBA</p><h2 id="comparison-heading">¿Mejora a repetir el último valor?</h2></div><span class="mini-note">1 = persistencia</span></div>
+        <div class="comparison-controls">
+          <label class="control"><span>Familia de arquitectura</span><select id="comparison-architecture"><option value="pfm">PFM</option><option value="upstream_bidirectional">GitHub bidireccional</option></select></label>
+          <label class="control"><span>Configuración elegida por validación</span><select id="comparison-criterion"><option value="mse">Menor MSE</option><option value="mae">Menor MAE</option></select></label>
+        </div>
+        <p class="description">Cada barra representa un modelo elegido por validación dentro de su grafo y arquitectura. La altura es MSE del modelo / MSE de persistencia en prueba: <strong>menor que 1 mejora a la referencia</strong>. No comparar alturas entre agrupaciones con objetivos distintos.</p>
+        <div class="comparison-canvas"><canvas id="comparison-chart" role="img" aria-label="Comparación de MSE de modelos respecto a persistencia">La comparación necesita Canvas.</canvas></div>
+        <div id="comparison-rows" class="comparison-rows"></div>
+        <p id="comparison-note" class="metric-note"></p>
+      </section>
+    </main>
+
+    <footer><strong>Lectura responsable.</strong> Esta página compara resultados históricos del índice C del PFM. No muestra el estado actual de la carretera ni prueba por sí sola que un modelo anticipe un atasco. GAT-GRU es una combinación adicional a las tres arquitecturas evaluadas en el documento.</footer>
+  </div>
+</body>
+</html>
