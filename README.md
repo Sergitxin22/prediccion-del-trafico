@@ -185,17 +185,38 @@ n_épocas = MAX_OPS // n_ops
 - **k**, grafos de entrenamiento: la longitud de `series.npz` → `train_starts`, el mismo valor que `metadata.json` → `split_samples.train`. Cada ventana temporal es un grafo. `prepare_series` conserva las ventanas con al menos un objetivo observado. El tamaño de lote agrupa esos grafos y deja `k` igual.
 - **x**: operaciones de una aplicación GCN o GAT, para un nodo, una capa y un instante.
 - **y**: operaciones de un paso LSTM o GRU.
-- **MAX_OPS**: presupuesto de ese modelo.
+- **MAX_OPS**: presupuesto de ese modelo. Sigue siendo un dato externo: el código no lo fija.
 
-`x`, `y` y `MAX_OPS` hay que medirlos fuera del código y pasarlos. El orden de cada `--budget` es modelo, `x`, `y` y `MAX_OPS`. Los modelos admitidos son `gcn_lstm`, `gcn_gru`, `gat_lstm` y `gat_gru`.
+Cada multiplicación y cada suma cuenta como una operación, en una pasada hacia delante. El grafo del protocolo tiene 5 vecinos y la capa añade el autobucle, así que cada nodo agrega 6 mensajes. Con anchura y memoria temporal 64, la primera capa espacial pasa de 1 a 64 rasgos y las siguientes de 64 a 64. Para dos capas, `x` es la media de esas dos aplicaciones, de modo que `x × λ` recupera la suma:
+
+| Modelo | x | y |
+|---|---:|---:|
+| GCN-LSTM | 4.678 | 66.624 |
+| GCN-GRU | 4.678 | 49.984 |
+| GAT-LSTM | 6.634 | 66.624 |
+| GAT-GRU | 6.634 | 49.984 |
+
+Con una sola capa hay que usar el coste de la capa 1→64: 268 para GCN y 2.602 para GAT. Con tres capas, la media es 6.148 para GCN y 7.978 para GAT. `y` no depende del número de capas. A anchura 32 y dos capas, `x` vale 1.318 (GCN) o 2.314 (GAT), e `y` vale 16.928 (LSTM) o 12.704 (GRU). A anchura 128, `x` vale 17.542 o 21.418, e `y` vale 264.320 o 198.272. El retroceso del entrenamiento no entra en estas cifras y suele acercarse al doble de la pasada hacia delante.
+
+En `data/processed_pfm_search_h4_20261008` los diez datasets comparten `T = 12` y `k = 2.068`. Los dos grafos de una misma agrupación tienen los mismos nodos, así que `n_ops` coincide. Con anchura 64 y dos capas, una época hacia delante cuesta:
+
+| Agrupación | Nodos | GCN-LSTM | GCN-GRU | GAT-LSTM | GAT-GRU |
+|---|---:|---:|---:|---:|---:|
+| Sensores individuales | 4.628 | 8.726.185.079.040 | 6.815.106.904.320 | 9.175.472.207.616 | 7.264.394.032.896 |
+| Proximidad 50 | 50 | 94.275.984.000 | 73.629.072.000 | 99.129.993.600 | 78.483.081.600 |
+| Proximidad 500 | 500 | 942.759.840.000 | 736.290.720.000 | 991.299.936.000 | 784.830.816.000 |
+| Proximidad y comportamiento 50 | 76 | 143.299.495.680 | 111.916.189.440 | 150.677.590.272 | 119.294.284.032 |
+| Proximidad y comportamiento 500 | 723 | 1.363.230.728.640 | 1.064.676.381.120 | 1.433.419.707.456 | 1.134.865.359.936 |
+
+El orden de cada `--budget` es modelo, `x`, `y` y `MAX_OPS`. Los modelos admitidos son `gcn_lstm`, `gcn_gru`, `gat_lstm` y `gat_gru`.
 
 ```bash
 python -B scripts/epochs_from_ops.py \
-  --source data/processed_pfm_matrix \
-  --budget gcn_lstm 1000 800 1000000000000 \
-  --budget gcn_gru  1000 600 1000000000000 \
-  --budget gat_lstm 1800 800 1000000000000 \
-  --budget gat_gru  1800 600 1000000000000 \
+  --source data/processed_pfm_search_h4_20261008 \
+  --budget gcn_lstm 4678 66624 100000000000000 \
+  --budget gcn_gru  4678 49984 100000000000000 \
+  --budget gat_lstm 6634 66624 100000000000000 \
+  --budget gat_gru  6634 49984 100000000000000 \
   --output target/epocas.csv
 ```
 
@@ -205,7 +226,7 @@ La misma información puede ir en un JSON y pasarse con `--budgets`:
 
 ```json
 {
-  "gcn_lstm": {"x": 1000, "y": 800, "max_ops": 1000000000000}
+  "gcn_lstm": {"x": 4678, "y": 66624, "max_ops": 100000000000000}
 }
 ```
 
